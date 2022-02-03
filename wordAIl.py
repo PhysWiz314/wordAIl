@@ -39,7 +39,7 @@ class Game:
         if guess not in self.vocab:
             print("Invalid word. Try again!")
             return False
-        return None
+        return True
 
     def _update_available_letters(self, guess, formatted_guess):
         letters = [letter for letter in self.available_letters if letter not in guess]
@@ -59,7 +59,6 @@ class Game:
             else:
                 formatted_guess.append('*')
 
-        print(formatted_guess)
         return formatted_guess
 
     def play(self) -> None:
@@ -74,6 +73,7 @@ class Game:
                 break
 
             formatted_guess = self.format_guess(guess)
+            print(formatted_guess)
 
             self._update_available_letters(guess, formatted_guess)
             self.current_turn += 1
