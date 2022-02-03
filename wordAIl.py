@@ -7,9 +7,10 @@ from common import config
 
 class Game:
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, interactive: bool):
         self.word_length = config['word_length']
         self.n_guesses = config['n_guesses']
+        self.interactive = interactive
         self.current_turn = 0
         self.won = False
         self._set_alphabet()
@@ -26,18 +27,20 @@ class Game:
 
     def _set_word(self):
         self.target_word = choice(self.vocab, 1)[0]
-        print(self.target_word)
 
     def validate_guess(self, guess: str) -> Optional[bool]:
         if guess == self.target_word:
-            print(f"Correct! {self.target_word}")
+            if self.interactive:
+                print(f"Correct! {self.target_word}")
             self.won = True
             return True
         if len(guess) != self.word_length:
-            print(f"Word must be {self.word_length} letters! Try again.")
+            if self.interactive:
+                print(f"Word must be {self.word_length} letters! Try again.")
             return False
         if guess not in self.vocab:
-            print("Invalid word. Try again!")
+            if self.interactive:
+                print("Invalid word. Try again!")
             return False
         return True
 
@@ -61,11 +64,15 @@ class Game:
 
         return formatted_guess
 
-    def play(self) -> None:
+    def play(self, guess = None):
         while self.current_turn < self.n_guesses:
-            print('Available letters')
-            print(self.available_letters)
-            guess = input(f'Guess {self.current_turn}: ').lower()
+            if self.interactive:
+                print('Available letters')
+                print(self.available_letters)
+                guess = input(f'Guess {self.current_turn}: ').lower()
+
+            if not guess:
+                raise ValueError("Please enter a guess in play() if not in interactive mode.")
 
             if not self.validate_guess(guess):
                 continue
@@ -73,15 +80,16 @@ class Game:
                 break
 
             formatted_guess = self.format_guess(guess)
-            print(formatted_guess)
+            if self.interactive:
+                print(formatted_guess)
 
             self._update_available_letters(guess, formatted_guess)
             self.current_turn += 1
 
-        if not self.won:
+        if not self.won and self.interactive:
             print(f"Sorry, the word was {self.target_word}")
 
 
 if __name__ == '__main__':
-    game = Game(config.game_config)
+    game = Game(config.game_config, config.INTERACTIVE)
     game.play()
