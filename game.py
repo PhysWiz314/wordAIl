@@ -47,7 +47,7 @@ class Game:
             return False
         return True
 
-    def _update_available_letters(self, guess, formatted_guess):
+    def _update_available_letters(self, guess: str, formatted_guess: List) -> None:
         letters = [letter for letter in self.available_letters if letter not in guess]
         letters = letters + [x for x in formatted_guess if x != '*' and x not in letters]
         self.available_letters = sorted(letters, key=str.casefold)
@@ -88,6 +88,3 @@ class Game:
 
             self._update_available_letters(guess, formatted_guess)
             self.current_turn += 1
-
-        if not self.won and self.interactive:
-            print(f"Sorry, the word was {self.target_word}")
