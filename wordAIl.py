@@ -57,7 +57,7 @@ class Game:
                     formatted_guess.append('*')
 
             self.available_letters = [letter for letter in self.available_letters if letter not in guess]
-            self.available_letters = self.available_letters + [x for x in formatted_guess if x != '*']
+            self.available_letters = self.available_letters + [x for x in formatted_guess if x != '*' and x not in self.available_letters]
             self.available_letters = sorted(self.available_letters, key=str.casefold)
             print(formatted_guess)
             self.current_turn += 1
