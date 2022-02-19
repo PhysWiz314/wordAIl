@@ -5,6 +5,23 @@ import string
 from game import Game    
 
 
+def generate_guess(state, word_length):
+        # Initialize the guess
+        guess = np.random.choice(alphabet, p=state[:26]/sum(state[:26]), size=word_length)
+        guess = ''.join(guess)
+
+        # Ensure that the guess is a real word
+        attempt = 0
+        while guess not in game.vocab:
+            guess = np.random.choice(alphabet, p=state[:26]/sum(state[:26]), size=word_length)
+            guess = ''.join(guess)
+            if attempt % 20 == 0:
+                print(guess, end='\r')
+            attempt += 1
+        print(guess)
+        return guess
+
+
 if __name__ == '__main__':
     if config.PLAY:
         while True:
@@ -29,17 +46,9 @@ if __name__ == '__main__':
         while game_n < 100:
             game_n += 1
             game = Game(config.game_config, config.INTERACTIVE)
+            print(f"Game: {game_n}")
             while game.current_turn < game.n_guesses:
-                # Initialize the guess
-                guess = np.random.choice(alphabet, p=state[:26]/sum(state[:26]), size=game.word_length)
-                guess = ''.join(guess)
-
-                # Ensure that the guess is a real word
-                while guess not in game.vocab:
-                    guess = np.random.choice(alphabet, p=state[:26]/sum(state[:26]), size=game.word_length)
-                    guess = ''.join(guess)
-                    print(guess, end='\r')
-                print(guess)
+                guess = generate_guess(state, game.word_length)
                 game.take_a_turn(guess)
                 state = game.state
                 reward = sum(state[:26])
