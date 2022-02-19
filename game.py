@@ -28,6 +28,9 @@ class Game:
         vocab = all_words[all_words['words'].str.len() == self.word_length]
         self.vocab = vocab['words'].values.flatten()
 
+        # Make sure letters don't appear twice in the word
+        self.vocab = [word for word in self.vocab if len(set(word)) == self.word_length]
+
     def _set_word(self):
         self.target_word = choice(self.vocab, 1)[0]
 
@@ -59,12 +62,20 @@ class Game:
         for idx, letter in enumerate(guess):
             if letter == self.target_word[idx]:
                 word_short = word_short[:idx] + word_short[idx+1:]
-                formatted_guess.append(letter.upper())
+                if self.interactive:
+                    formatted_guess.append(letter.upper())
+                else:
+                    formatted_guess.append(2)
             elif letter in word_short:
-                formatted_guess.append(letter.lower())
+                if self.interactive:
+                    formatted_guess.append(letter.lower())
+                else:
+                    formatted_guess.append(1)
             else:
-                formatted_guess.append('*')
-
+                if self.interactive:
+                    formatted_guess.append('*')
+                else:
+                    formatted_guess.append(0)
         return formatted_guess
 
     def play(self, guess = None):
