@@ -13,12 +13,16 @@ def generate_guess(state, word_length):
         # Ensure that the guess is a real word
         attempt = 0
         while guess not in game.vocab:
-            guess = np.random.choice(alphabet, p=state[:26]/sum(state[:26]), size=word_length)
+            guess = np.random.choice(alphabet, p=state[:26]/sum(state[:26]), size=word_length, replace=False)
             guess = ''.join(guess)
-            if attempt % 20 == 0:
-                print(guess, end='\r')
+            if attempt % 100 == 0:
+                print(f'{sum(state[26:])}-{guess}: {attempt}', end='\r')
+                # input()
             attempt += 1
-        print(guess)
+            if attempt == 1_000_000:
+                print("Can't find a word in over 1 million guesses.")
+                return None
+        print(guess, ' '*20)
         return guess
 
 
@@ -49,6 +53,10 @@ if __name__ == '__main__':
             print(f"Game: {game_n}")
             while game.current_turn < game.n_guesses:
                 guess = generate_guess(state, game.word_length)
+                if guess is None:
+                    won.append(0)
+                    print(f"Sorry You Lose, the word was {game.target_word}")
+                    break
                 game.take_a_turn(guess)
                 state = game.state
                 reward = sum(state[:26])
@@ -62,7 +70,7 @@ if __name__ == '__main__':
                     print(f"Sorry You Lose, the word was {game.target_word}")
                 # print(state[:26], state[26:], reward)
                 # input()
-        wins_vs_losses = [1 for x in won if x > 0]
+        wins_vs_losses = [1 if x > 0 else 0 for x in won]
         turns = [x for x in won if x > 0]
         print(f'Stats: Win % - {sum(wins_vs_losses)/len(wins_vs_losses)}')
         print(f'Stats: Avg Turns - {sum(turns)/len(turns)}')
