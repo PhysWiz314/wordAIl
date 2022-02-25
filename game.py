@@ -77,12 +77,12 @@ class Game:
                 if config.PLAY:
                     formatted_guess.append(letter.upper())
                 else:
-                    formatted_guess.append([letter.upper(), 20])
+                    formatted_guess.append([letter.upper(), 50])
             elif letter in word_short:
                 if config.PLAY:
                     formatted_guess.append(letter.lower())
                 else:
-                    formatted_guess.append([letter.lower(), 10])
+                    formatted_guess.append([letter.lower(), 25])
             else:
                 if config.PLAY:
                     formatted_guess.append('*')

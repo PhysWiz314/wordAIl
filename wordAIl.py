@@ -6,6 +6,8 @@ from game import Game
 
 
 def generate_guess(state, word_length):
+        # Initialize the alphabet
+        alphabet = list(string.ascii_lowercase)
         # Initialize the guess
         guess = np.random.choice(alphabet, p=state[:26]/sum(state[:26]), size=word_length)
         guess = ''.join(guess)
@@ -41,25 +43,23 @@ if __name__ == '__main__':
                     break
     
     else:
-        state = np.array([1]*26 + [-1]*26)  # [Score of letter, index of letter]
+        # state = np.array([1]*26 + [-1]*26)  # [Score of letter, index of letter]
         reward = 0  #  sum of letter scores 3 - right position, 2 - right letter, 1 - not guessed, 0 guessed
         game_n = 0
-        alphabet = list(string.ascii_lowercase)
 
         won = []
-        while game_n < 100:
+        while game_n < 1000:
             game_n += 1
             game = Game(config.game_config, config.INTERACTIVE)
             print(f"Game: {game_n}")
             while game.current_turn < game.n_guesses:
-                guess = generate_guess(state, game.word_length)
+                guess = generate_guess(game.state, game.word_length)
                 if guess is None:
-                    won.append(0)
+                    won.append(-1)
                     print(f"Sorry You Lose, the word was {game.target_word}")
                     break
                 game.take_a_turn(guess)
-                state = game.state
-                reward = sum(state[:26])
+                reward = sum(game.state[:26])
                 if game.won:
                     print(f"You win! The word was {game.target_word}")
                     won.append(game.current_turn)
@@ -74,3 +74,4 @@ if __name__ == '__main__':
         turns = [x for x in won if x > 0]
         print(f'Stats: Win % - {sum(wins_vs_losses)/len(wins_vs_losses)}')
         print(f'Stats: Avg Turns - {sum(turns)/len(turns)}')
+        print(f'Stats: >1M guesses - {sum([1 if x < 0 else 0 for x in won])}')
