@@ -2,7 +2,7 @@ from common import config
 import numpy as np
 import string
 
-from game import Game    
+from app.game import Game    
 
 
 def generate_guess(state, word_length):
