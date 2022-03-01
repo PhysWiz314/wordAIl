@@ -4,13 +4,25 @@ from pathlib import Path
 
 import pandas as pd
 import numpy as np
+from tf_agents.specs import array_spec
+from tf_agents.environments import py_environment
+from tf_agents.trajectories import time_step as ts
 
 from common import config
 
 
-class Game:
+class Game(py_environment.PyEnvironment):
 
     def __init__(self, config: Dict, interactive: bool):
+        self._action_spec = array_spec.BoundedArraySpec(
+            shape=(5,), dtype=np.int32, minimum=0, maximum=25, name='action'
+        )
+        self._observation_spec = array_spec.BoundedArraySpec(
+            shape=(26,), dtype=np.int32, minimum=0, maximum=1, name='observation'
+        )
+        # self._state = 0
+        self._episode_ended = False
+
         self.word_length = config['word_length']
         self.n_guesses = config['n_guesses']
         self.interactive = interactive
@@ -22,7 +34,8 @@ class Game:
 
     def _set_alphabet(self) -> List:
         self.available_letters = list(string.ascii_lowercase)
-        self.state = np.array([1]*26 + [-1]*26)  # [Score of letter, index of letter]
+        self._state = np.zeros(26, dtype=np.int32)
+        print(self._state)
 
 
     def _set_vocab(self, path: Path = config.WORD_FILE) -> Tuple[str, List]:
@@ -65,7 +78,7 @@ class Game:
             else:
                 pos_in_alphabet = self.available_letters.index(letter[0].lower())
                 self.state[pos_in_alphabet] = letter[1]
-                self.state[pos_in_alphabet + 26] = idx
+                # self.state[pos_in_alphabet + 26] = idx
 
     def format_guess(self, guess: str) -> List:
         formatted_guess = []
@@ -90,10 +103,18 @@ class Game:
                     formatted_guess.append(['*', 0])
         return formatted_guess
 
-    def take_a_turn(self, guess):
-            if not self.validate_guess(guess):
-                return
+    def _step(self, action):
+        # Turn the action into a word
+        alphabet = list(string.ascii_lowercase)
+        guess = ''.join([alphabet[i] for i in action])
 
+        if self._episode_ended:
+            return self.reset()
+
+        print(self.current_turn)
+        if self.current_turn >= self.n_guesses:
+            self._episode_ended = True
+        else:
             formatted_guess = self.format_guess(guess)
             if self.interactive:
                 print(formatted_guess)
@@ -101,7 +122,23 @@ class Game:
                 self._update_available_letters(guess, formatted_guess)
             else:
                 self._update_alphabet_scores(guess, formatted_guess)
+            self._state = self.state
+
+        print(self.state)
+        if self._episode_ended:
+            reward = sum(self._state)
+            return ts.termination(self._state, reward)
+        else:
             self.current_turn += 1
+            return ts.transition(
+                self._state, reward=0, discount=1.0
+            )
+
+
+    def _reset(self):
+        # self._state = np.array([0]*26)
+        self._episode_ended = False
+        return ts.restart(self._state)
 
     def play(self, guess = None):
         while self.current_turn < self.n_guesses:
@@ -113,4 +150,11 @@ class Game:
             if not guess:
                 raise ValueError("Please enter a guess in play() if not in interactive mode.")
 
-            self.take_a_turn(guess)
+            self._step(guess)
+
+
+    def action_spec(self):
+        return self._action_spec
+    
+    def observation_spec(self):
+        return self._observation_spec
