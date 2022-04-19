@@ -1,155 +1,238 @@
+import os
+import tempfile
 import tensorflow as tf
 
+import matplotlib.pyplot as plt
 import reverb
-from tf_agents.agents.dqn import dqn_agent
-from tf_agents.networks import sequential
-from tf_agents.utils import common
-from tf_agents.drivers import py_driver
+from tf_agents.agents.ddpg import critic_network
+from tf_agents.agents.sac import sac_agent
+from tf_agents.agents.sac import tanh_normal_projection_network
+from tf_agents.metrics import py_metrics
+from tf_agents.networks import actor_distribution_network
 from tf_agents.policies import py_tf_eager_policy
-from tf_agents.specs import tensor_spec
+from tf_agents.policies import random_py_policy
 from tf_agents.replay_buffers import reverb_replay_buffer
 from tf_agents.replay_buffers import reverb_utils
-from tf_agents.environments import tf_py_environment
-from tf_agents.environments.wrappers import FlattenActionWrapper
-
+from tf_agents.train import actor
+from tf_agents.train import learner
+from tf_agents.train import triggers
+from tf_agents.train.utils import spec_utils
+from tf_agents.train.utils import train_utils
 
 from app.game import Game
 from common.config import INTERACTIVE, PLAY, game_config
 
-num_iterations = 10
-initial_collect_steps = 100  # @param {type:"integer"}
-collect_steps_per_iteration =   1# @param {type:"integer"}
-replay_buffer_max_length = 100000  # @param {type:"integer"}
+tempdir = tempfile.gettempdir()
 
-batch_size = 64  # @param {type:"integer"}
-learning_rate = 1e-3  # @param {type:"number"}
-log_interval = 200  # @param {type:"integer"}
+num_iterations = 10000
+initial_collect_steps = 100  
+collect_steps_per_iteration =   1
+replay_buffer_capacity = 10000  
 
-num_eval_episodes = 10  # @param {type:"integer"}
-eval_interval = 1000  # @param {type:"integer"}
+batch_size = 256
+critic_learning_rate = 3e-4
+actor_learning_rate = 3e-4
+alpha_learning_rate = 3e-4 
+target_update_tau = 0.005 
+target_update_period = 1 
+gamma = 0.99 
+reward_scale_factor = 1.0 
 
-# Create the agent network
-def dense_layer(num_units):
-    return tf.keras.layers.Dense(
-        num_units,
-        activation=tf.keras.activations.relu,
-        kernel_initializer=tf.keras.initializers.VarianceScaling(
-            scale=2.0, mode='fan_in', distribution='truncated_normal'
-        )
-    )
+actor_fc_layer_params = (256, 256)
+critic_joint_fc_layer_params = (256, 256)
 
-# Create the q-network
-dense_layers = [dense_layer(num_units) for num_units in (5, 10)]
-q_values_layer = tf.keras.layers.Dense(
-    26,
-    activation=None,
-    kernel_initializer=tf.keras.initializers.RandomUniform(
-        minval=-0.03, maxval=0.03
-    ),
-    bias_initializer=tf.keras.initializers.Constant(-0.2)
-)
-q_net = sequential.Sequential(dense_layers + [q_values_layer])
+log_interval = 5000 
+
+num_eval_episodes = 20 
+eval_interval = 1000
+
+policy_save_interval = 5000 
 
 # Start game
-game = Game(game_config, True)
-game = FlattenActionWrapper(game)
-game = tf_py_environment.TFPyEnvironment(game)
+collect_game = Game(game_config, False)
+eval_game = Game(game_config, True)
 
-# Instantiate the DqnAgent
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.1)
-train_step_counter = tf.Variable(0)
+observation_spec, action_spec, time_step_spec = (
+      spec_utils.get_tensor_specs(collect_game))
 
-agent = dqn_agent.DqnAgent(
-    time_step_spec=game.time_step_spec(),
-    action_spec=game.action_spec(),
-    q_network=q_net,
-    optimizer=optimizer,
-    td_errors_loss_fn=common.element_wise_squared_loss,
-    train_step_counter=train_step_counter
+# Create the agent network
+critic_net = critic_network.CriticNetwork(
+    (observation_spec, action_spec),
+    observation_fc_layer_params=None,
+    action_fc_layer_params=None,
+    joint_fc_layer_params=critic_joint_fc_layer_params,
+    kernel_initializer='glorot_uniform',
+    last_kernel_initializer='glorot_uniform')
+
+actor_net = actor_distribution_network.ActorDistributionNetwork(
+    observation_spec,
+    action_spec,
+    fc_layer_params=actor_fc_layer_params,
+    continuous_projection_net=(
+        tanh_normal_projection_network.TanhNormalProjectionNetwork
+    )
 )
 
-agent.initialize()
+train_step = train_utils.create_train_step()
+tf_agent = sac_agent.SacAgent(
+    time_step_spec,
+    action_spec,
+    actor_network=actor_net,
+    critic_network=critic_net,
+    actor_optimizer=tf.keras.optimizers.Adam(
+        learning_rate=actor_learning_rate
+    ),
+    critic_optimizer=tf.keras.optimizers.Adam(
+        learning_rate=critic_learning_rate),
+    alpha_optimizer=tf.keras.optimizers.Adam(
+        learning_rate=alpha_learning_rate),
+    target_update_tau=target_update_tau,
+    target_update_period=target_update_period,
+    td_errors_loss_fn=tf.math.squared_difference,
+    gamma=gamma,
+    reward_scale_factor=reward_scale_factor,
+    train_step_counter=train_step
+)
 
-def compute_avg_return(environment, policy, num_episodes=10):
+tf_agent.initialize()
 
-  total_return = 0.0
-  for _ in range(num_episodes):
-
-    time_step = environment.reset()
-    episode_return = 0.0
-
-    while not time_step.is_last():
-      action_step = policy.action(time_step)
-      time_step = environment.step(action_step.action)
-      episode_return += time_step.reward
-    total_return += episode_return
-
-  avg_return = total_return / num_episodes
-  return avg_return.numpy()[0]
-
+# Replay buffer
+rate_limiter=reverb.rate_limiters.SampleToInsertRatio(samples_per_insert=3.0, min_size_to_sample=3, error_buffer=3.0)
 
 table_name = 'uniform_table'
-replay_buffer_signature = tensor_spec.from_spec(
-      agent.collect_data_spec)
-replay_buffer_signature = tensor_spec.add_outer_dim(
-    replay_buffer_signature)
-
 table = reverb.Table(
     table_name,
-    max_size=replay_buffer_max_length,
+    max_size=replay_buffer_capacity,
     sampler=reverb.selectors.Uniform(),
     remover=reverb.selectors.Fifo(),
-    rate_limiter=reverb.rate_limiters.MinSize(1),
-    signature=replay_buffer_signature)
+    rate_limiter=reverb.rate_limiters.MinSize(1))
 
 reverb_server = reverb.Server([table])
-
-replay_buffer = reverb_replay_buffer.ReverbReplayBuffer(
-    agent.collect_data_spec,
-    table_name=table_name,
+reverb_replay = reverb_replay_buffer.ReverbReplayBuffer(
+    tf_agent.collect_data_spec,
     sequence_length=2,
-    local_server=reverb_server)
-
-rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
-  replay_buffer.py_client,
-  table_name,
-  sequence_length=2)
-
-collect_driver = py_driver.PyDriver(
-    game,
-    py_tf_eager_policy.PyTFEagerPolicy(
-        agent.collect_policy, use_tf_function=True),
-    [rb_observer],
-    max_steps=collect_steps_per_iteration
+    table_name=table_name,
+    local_server=reverb_server
 )
 
-dataset = replay_buffer.as_dataset(
-    num_parallel_calls=3,
-    sample_batch_size=batch_size,
-    num_steps=2).prefetch(3)
+dataset = reverb_replay.as_dataset(
+      sample_batch_size=batch_size, num_steps=2).prefetch(50)
+experience_dataset_fn = lambda: dataset
 
-iterator = iter(dataset)
+# Policies
+tf_eval_policy = tf_agent.policy
+eval_policy = py_tf_eager_policy.PyTFEagerPolicy(
+  tf_eval_policy, use_tf_function=True)
 
-agent.train = common.function(agent.train)
-agent.train_step_counter.assign(0)
-avg_return = compute_avg_return(game, agent.policy, 10)
+tf_collect_policy = tf_agent.collect_policy
+collect_policy = py_tf_eager_policy.PyTFEagerPolicy(
+  tf_collect_policy, use_tf_function=True)
+
+random_policy = random_py_policy.RandomPyPolicy(
+  collect_game.time_step_spec(), collect_game.action_spec())
+
+
+# Actors
+rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
+  reverb_replay.py_client,
+  table_name,
+  sequence_length=2,
+  stride_length=1)
+
+initial_collect_actor = actor.Actor(
+  collect_game,
+  random_policy,
+  train_step,
+  steps_per_run=initial_collect_steps,
+  observers=[rb_observer])
+initial_collect_actor.run()
+
+env_step_metric = py_metrics.EnvironmentSteps()
+collect_actor = actor.Actor(
+  collect_game,
+  collect_policy,
+  train_step,
+  steps_per_run=1,
+  metrics=actor.collect_metrics(10),
+  summary_dir=os.path.join(tempdir, learner.TRAIN_DIR),
+  observers=[rb_observer, env_step_metric])
+
+eval_actor = actor.Actor(
+  eval_game,
+  eval_policy,
+  train_step,
+  episodes_per_run=num_eval_episodes,
+  metrics=actor.eval_metrics(num_eval_episodes),
+  summary_dir=os.path.join(tempdir, 'eval'),
+)
+
+# Learners
+saved_model_dir = os.path.join(tempdir, learner.POLICY_SAVED_MODEL_DIR)
+
+# Triggers to save the agent's policy checkpoints.
+learning_triggers = [
+    triggers.PolicySavedModelTrigger(
+        saved_model_dir,
+        tf_agent,
+        train_step,
+        interval=policy_save_interval),
+    triggers.StepPerSecondLogTrigger(train_step, interval=1000),
+]
+
+agent_learner = learner.Learner(
+  tempdir,
+  train_step,
+  tf_agent,
+  experience_dataset_fn,
+  triggers=learning_triggers)
+
+# Metrics
+def get_eval_metrics():
+  eval_actor.run()
+  results = {}
+  for metric in eval_actor.metrics:
+    results[metric.name] = metric.result()
+  return results
+
+metrics = get_eval_metrics()
+
+def log_eval_metrics(step, metrics):
+  eval_results = (', ').join(
+      '{} = {:.6f}'.format(name, result) for name, result in metrics.items())
+  print('step = {0}: {1}'.format(step, eval_results))
+
+log_eval_metrics(0, metrics)
+
+# Training
+# Reset the train step
+tf_agent.train_step_counter.assign(0)
+
+# Evaluate the agent's policy once before training.
+avg_return = get_eval_metrics()["AverageReturn"]
 returns = [avg_return]
 
-time_step = game.reset()
-
 for _ in range(num_iterations):
+  # Training.
+  collect_actor.run()
+  loss_info = agent_learner.run(iterations=1)
 
-    time_step, _ = collect_driver.run(time_step)
+  # Evaluating.
+  step = agent_learner.train_step_numpy
 
-    experience, unused_info = next(iterator)
-    train_loss = agent.train(experience).loss
+  if eval_interval and step % eval_interval == 0:
+    metrics = get_eval_metrics()
+    log_eval_metrics(step, metrics)
+    returns.append(metrics["AverageReturn"])
 
-    step = agent.train_step_counter.numpy()
+  if log_interval and step % log_interval == 0:
+    print('step = {0}: loss = {1}'.format(step, loss_info.loss.numpy()))
 
-    if step % log_interval == 0:
-        print(f'step = {step}: loss = {train_loss}')
+rb_observer.close()
+reverb_server.stop()
 
-    if step % eval_interval == 0:
-        avg_return = compute_avg_return(game, agent.policy, num_eval_episodes)
-        print('step = {0}: Average Return = {1}'.format(step, avg_return))
-        returns.append(avg_return)
+steps = range(0, num_iterations + 1, eval_interval)
+plt.plot(steps, returns)
+plt.ylabel('Average Return')
+plt.xlabel('Step')
+plt.ylim()
+plt.show()

@@ -15,17 +15,21 @@ class Game(py_environment.PyEnvironment):
 
     def __init__(self, config: Dict, interactive: bool):
         self._action_spec = array_spec.BoundedArraySpec(
-            shape=(5,), dtype=np.int32, minimum=0, maximum=25, name='action'
+            shape=(5,), dtype=np.float32, minimum=0.0, maximum=25.4, name='action'
         )
         self._observation_spec = array_spec.BoundedArraySpec(
-            shape=(26,), dtype=np.int32, minimum=0, maximum=1, name='observation'
+            shape=(26,), dtype=np.float32, minimum=0.0, maximum=1.0, name='observation'
         )
-        # self._state = 0
+        self.config = config
+        self.interactive = interactive
         self._episode_ended = False
 
-        self.word_length = config['word_length']
-        self.n_guesses = config['n_guesses']
-        self.interactive = interactive
+        self.new_game()
+
+    def new_game(self):
+        self.word_length = self.config['word_length']
+        self.n_guesses = self.config['n_guesses']
+        self.interactive = self.interactive
         self.current_turn = 0
         self.won = False
         self._set_alphabet()
@@ -34,9 +38,7 @@ class Game(py_environment.PyEnvironment):
 
     def _set_alphabet(self) -> List:
         self.available_letters = list(string.ascii_lowercase)
-        self._state = np.zeros(26, dtype=np.int32)
-        print(self._state)
-
+        self._state = np.zeros(26, dtype=np.float32)
 
     def _set_vocab(self, path: Path = config.WORD_FILE) -> Tuple[str, List]:
         all_words = pd.read_csv(path)
@@ -74,10 +76,10 @@ class Game(py_environment.PyEnvironment):
         for idx, letter in enumerate(formatted_guess):
             if letter[0] == '*':
                 pos_in_alphabet = self.available_letters.index(guess[idx])
-                self.state[pos_in_alphabet] = letter[1]
+                self._state[pos_in_alphabet] = letter[1]
             else:
                 pos_in_alphabet = self.available_letters.index(letter[0].lower())
-                self.state[pos_in_alphabet] = letter[1]
+                self._state[pos_in_alphabet] = letter[1]
                 # self.state[pos_in_alphabet + 26] = idx
 
     def format_guess(self, guess: str) -> List:
@@ -106,12 +108,14 @@ class Game(py_environment.PyEnvironment):
     def _step(self, action):
         # Turn the action into a word
         alphabet = list(string.ascii_lowercase)
-        guess = ''.join([alphabet[i] for i in action])
+        try:
+            guess = ''.join([alphabet[int(i)] for i in action])
+        except IndexError:
+            ...
 
         if self._episode_ended:
             return self.reset()
 
-        print(self.current_turn)
         if self.current_turn >= self.n_guesses:
             self._episode_ended = True
         else:
@@ -122,9 +126,7 @@ class Game(py_environment.PyEnvironment):
                 self._update_available_letters(guess, formatted_guess)
             else:
                 self._update_alphabet_scores(guess, formatted_guess)
-            self._state = self.state
 
-        print(self.state)
         if self._episode_ended:
             reward = sum(self._state)
             return ts.termination(self._state, reward)
@@ -136,7 +138,9 @@ class Game(py_environment.PyEnvironment):
 
 
     def _reset(self):
-        # self._state = np.array([0]*26)
+        if self.interactive:
+            print(self.target_word)
+        self.new_game()
         self._episode_ended = False
         return ts.restart(self._state)
 
