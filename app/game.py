@@ -84,16 +84,24 @@ class Game(py_environment.PyEnvironment):
 
     def format_guess(self, guess: str) -> List:
         formatted_guess = []
-        word_short = self.target_word
+        word_list = list(self.target_word)
 
         for idx, letter in enumerate(guess):
             if letter == self.target_word[idx]:
-                word_short = word_short[:idx] + word_short[idx+1:]
+                word_list[idx] = "."
                 if config.PLAY:
                     formatted_guess.append(letter.upper())
                 else:
                     formatted_guess.append([letter.upper(), 50])
-            elif letter in word_short:
+            elif letter in self.target_word:
+                if letter not in word_list:
+                    if config.PLAY:
+                        formatted_guess.append('*')
+                    else:
+                        formatted_guess.append(['*', 0])
+                        continue
+                letter_index = self.target_word.index(letter)
+                word_list[letter_index] = "."
                 if config.PLAY:
                     formatted_guess.append(letter.lower())
                 else:
